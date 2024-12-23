@@ -88,7 +88,8 @@ let%expect_test "exec_command" =
   Format.printf "bar: %s\n" res.bar;
   [%expect {|
     foo: 1000
-    bar: 2000 |}]
+    bar: 2000 |}];
+  Lwt.return ()
 
 let%expect_test "cancellation" =
   let client_rpc, server_rpc = create_rpc_pair () in
@@ -138,7 +139,8 @@ let%expect_test "cancellation" =
     3
     1
     2
-    5 |}]
+    5 |}];
+  Lwt.return ()
 
 let%expect_test "send_event" =
   let client_rpc, server_rpc = create_rpc_pair () in
@@ -170,4 +172,5 @@ let%expect_test "send_event" =
     1
     2
     3
-    4 |}]
+    4 |}];
+  Lwt.return ()
