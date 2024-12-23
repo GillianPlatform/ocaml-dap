@@ -165,7 +165,7 @@ function genType(def, prop, parentDef) {
       return `${genType(itemType, prop)} list`;
     }
     default:
-      throw new Error('Assertion failed');
+      throw new Error(`Unknown type ${def.type}\n${JSON.stringify(def, null, 2)}`);
   }
 }
 
@@ -186,8 +186,10 @@ function emitTypeDecl(emit, def, {generic, isEmitTypeModule} = {}) {
       emit(` String_opt_dict.t\n`);
     } else if (def.additionalProperties.type === 'string') {
       emit(` String_dict.t\n`);
+    } else if (def.additionalProperties === true) {
+      emit(` Yojson.Safe.t\n`)
     } else {
-      throw new Error('Assertion failed');
+      throw new Error(`Unhandled object type\n${JSON.stringify(def, null, 2)}`);
     }
     emit(`[@@deriving yojson]`);
   } else if (def == null || (def.type === 'object' && _.isEmpty(def.properties))) {
