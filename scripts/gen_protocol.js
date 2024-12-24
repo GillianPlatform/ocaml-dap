@@ -3,9 +3,28 @@ const yargs = require('yargs/yargs')
 const { hideBin } = require('yargs/helpers')
 const argv = yargs(hideBin(process.argv)).argv
 const _ = require('lodash');
-const hackSchema = require('./hack_schema');
 
-const schema = hackSchema(JSON.parse(Fs.readFileSync(argv._[0])));
+function hackRestartRequestArguments(schema) {
+  const args = schema.definitions.RestartArguments;
+  delete schema.definitions.RestartArguments;
+  args.properties.arguments = {
+    type: 'object',
+    properties: schema.definitions.LaunchRequestArguments.properties
+  };
+  schema.definitions.RestartRequestArguments = args;
+}
+
+function hackSchema(schema) {
+  schema.definitions.Variable.properties.__vscodeVariableMenuContext = { type: 'string' };
+  hackRestartRequestArguments(schema);
+  return schema;
+}
+
+const arg0 = argv._[0]?.trim();
+if (arg0 !== 'ml' && arg0 !== 'mli')
+  throw new Error('First argument should be either \'ml\' or \'mli\'');
+const mli = arg0 === 'mli';
+const schema = hackSchema(JSON.parse(Fs.readFileSync(argv._[1])));
 
 function resolveDef(def) {
   if (def != null && def.$ref) {
@@ -46,7 +65,12 @@ function emit(str) {
 
 emit(`(** ${schema.description} *)\n`);
 emit(`(* Auto-generated from json schema. Do not edit manually. *)\n\n`);
-emit(`include module type of Debug_protocol_types\n\n`);
+if (mli) {
+  emit(`include module type of Debug_protocol_types\n\n`);
+} else {
+  emit(`open Util\n\n`);
+  emit(`include Debug_protocol_types\n\n`);
+}
 
 const toOcamlName = (() => {
   function toSnakeCase(key) {
@@ -90,11 +114,11 @@ let emitLocalModule = () => {
 };
 
 function emitModule(emit, modId, f) {
-  emit(`module ${modId} : sig\n`);
+  emit(mli ? `module ${modId} : sig\n` : `module ${modId} = struct\n`);
   const prevEmitLocalModule = emitLocalModule;
-  emitLocalModule = (modId, f) => {
+  emitLocalModule = (localModId, f) => {
     withIndent(emit, (emit) => {
-      emitModule(emit, modId, f);
+      emitModule(emit, localModId, f);
       emit('\n');
     });
   };
@@ -139,9 +163,7 @@ function genType(def, prop, parentDef) {
     }
   }
 
-
-  if (def.type == 'object' && def.additionalProperties != null) {
-    debugger;
+  if (mli && def.type == 'object' && def.additionalProperties != null) {
     return `String_opt_dict.t`;
   }
 
@@ -184,7 +206,7 @@ function emitTypeDecl(emit, def, {generic, isEmitTypeModule} = {}) {
   emit(`type t =`);
   if (!isEmitTypeModule && Object.entries(types).some(it => it[1] === def)) {
     const typeName = Object.entries(types).find(it => it[1] === def)[0];
-    emit(` ${toOcamlName(typeName)}.t`);
+    emit(mli ? ` ${toOcamlName(typeName)}.t` : ` ${toOcamlName(typeName)}.t\n`);
     emit(`[@@deriving yojson]`);
   } else if (def != null && def.type === 'object' && def.additionalProperties != null) {
     if (_.isEqual(_.sortBy(def.additionalProperties.type), ['null', 'string'])) {
@@ -276,7 +298,25 @@ function emitTypeDecl(emit, def, {generic, isEmitTypeModule} = {}) {
       emit(`  | Custom of string\n`);
     }
     emit(`\n`);
-    emit(`include JSONABLE with type t := t`);
+    if (mli) {
+      emit(`include JSONABLE with type t := t`);
+    } else {
+      emit(`let of_yojson = function\n`);
+      for (const str of strs) {
+        emit(`  | \`String "${str}" -> Ok ${toOcamlName(str.replace(/ /g, '_'), true)}\n`);
+      }
+      if (isOpen) {
+        emit(`  | \`String str -> Ok (Custom str)`);
+      }
+      emit(`  | _ -> Error (print_exn_at_loc [%here])\n\n`);
+      emit(`let to_yojson = function\n`);
+      for (const str of strs) {
+        emit(`  | ${toOcamlName(str.replace(/ /g, '_'), true)} -> \`String "${str}"\n`);
+      }
+      if (isOpen) {
+        emit(`  | Custom str -> \`String str`);
+      }
+    }
   }
   emit(`\n`);
 }
@@ -305,7 +345,7 @@ function emitEventModule(event, {doc, body}) {
       emit('\n');
     }
     emitModule(emit, toOcamlName(`${event}_event`, true), (emit) => {
-      emit(`val type_ : string\n`);
+      emit(mli ? `val type_ : string\n` : `let type_ = "${event}"\n`);
       emit('\n');
       emitModule(emit, toOcamlName('Payload', true), (emit) => {
         emitTypeDecl(emit, body);
@@ -322,7 +362,7 @@ function emitRequestModule(command, {doc, arguments, responseBody}) {
       emit('\n');
     }
     emitModule(emit, toOcamlName(`${command}_command`, true), (emit) => {
-      emit(`val type_ : string\n`);
+      emit(mli ? `val type_ : string\n` : `let type_ = "${command}"\n`);
       emit('\n');
       emitModule(emit, toOcamlName('Arguments', true), (emit) => {
         emitTypeDecl(emit, arguments);
